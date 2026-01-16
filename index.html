@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>City Racer Pro - City Edition</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.0/p5.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.0/addons/p5.sound.min.js"></script>
+    <style>
+        body { margin: 0; padding: 0; overflow: hidden; background: #222; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        canvas { display: block; }
+        #ui-layer {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            display: flex; flex-direction: column;
+            justify-content: center; align-items: center;
+            background: rgba(0, 0, 0, 0.8);
+            z-index: 100; color: white; text-align: center;
+        }
+        h1 { font-size: 50px; margin-bottom: 5px; color: #f1c40f; text-shadow: 2px 2px #c0392b; }
+        #recorde-ui { font-size: 18px; color: #ecf0f1; margin-bottom: 20px; }
+        #btn-play {
+            padding: 15px 50px; font-size: 22px; font-weight: bold;
+            background: #27ae60; color: white; border: none;
+            border-radius: 8px; cursor: pointer; transition: 0.3s;
+        }
+        #btn-play:hover { background: #2ecc71; transform: scale(1.1); }
+    </style>
+</head>
+<body>
+
+    <div id="ui-layer">
+        <h1 id="titulo">CITY RACER</h1>
+        <p id="recorde-ui">RECORDE: 0m</p>
+        <p id="subtitulo">Toque nas laterais para desviar!</p>
+        <button id="btn-play" onclick="iniciarJogo()">JOGAR</button>
+    </div>
+
+    <script>
+        let carroPos = 1; 
+        let carroX; 
+        let faixas;
+        let obstaculos = [];
+        let cidades = [];
+        let particulasFumaca = []; 
+        let moedas = 0;
+        let distancia = 0;
+        let recorde = 0;
+        let jogoRodando = false;
+        let velBase = 5;
+        let offsetEstrada = 0;
+
+        let motorSutil, motorGrave, motorHarmonico, filtroSuave;
+        let somBatida;
+
+        function setup() {
+            createCanvas(windowWidth, windowHeight);
+            atualizarFaixas();
+            carroX = faixas[1];
+            
+            motorSutil = new p5.Oscillator('sawtooth'); 
+            motorGrave = new p5.Oscillator('sine'); 
+            motorHarmonico = new p5.Oscillator('triangle');
+            filtroSuave = new p5.LowPass();
+            
+            filtroSuave.freq(600); 
+            filtroSuave.res(2);
+
+            motorSutil.disconnect();
+            motorGrave.disconnect();
+            motorHarmonico.disconnect();
+            
+            motorSutil.connect(filtroSuave);
+            motorGrave.connect(filtroSuave);
+            motorHarmonico.connect(filtroSuave);
+
+            somBatida = new p5.Noise('brown');
+            somBatida.amp(0);
+            somBatida.start();
+            
+            let recordeSalvo = localStorage.getItem("cityRacerRecorde");
+            if (recordeSalvo) {
+                recorde = parseInt(recordeSalvo);
+                document.getElementById('recorde-ui').innerText = `RECORDE: ${recorde}m`;
+            }
+            noLoop(); 
+        }
+
+        function atualizarFaixas() {
+            faixas = [width * 0.25, width * 0.5, width * 0.75];
+        }
+
+        window.iniciarJogo = function() {
+            userStartAudio();
+            motorSutil.start();
+            motorGrave.start();
+            motorHarmonico.start();
+            
+            motorSutil.amp(0.15, 0.5); 
+            motorGrave.amp(0.4, 0.5);  
+            motorHarmonico.amp(0.2, 0.5);
+
+            carroPos = 1;
+            carroX = faixas[1];
+            obstaculos = [];
+            cidades = [];
+            particulasFumaca = [];
+            moedas = 0;
+            distancia = 0;
+            jogoRodando = true;
+            document.getElementById('ui-layer').style.display = 'none';
+            loop();
+        };
+
+        function draw() {
+            if (!jogoRodando) return;
+
+            background(20); 
+            
+            let velAtual = velBase + (distancia / 2500);
+            distancia += velAtual / 10;
+
+            let freqBase = 60 + (velAtual * 2);
+            motorGrave.freq(freqBase);
+            motorSutil.freq(freqBase * 1.5);
+            motorHarmonico.freq(freqBase * 0.75);
+            filtroSuave.freq(400 + (velAtual * 20));
+
+            desenharCenario(velAtual);
+            desenharEstrada(velAtual);
+
+            if (frameCount % 2 === 0) {
+                particulasFumaca.push({
+                    x: carroX + 18,
+                    y: height - 85,
+                    tamanho: random(5, 12),
+                    opacidade: 150,
+                    vx: random(-0.5, 0.5)
+                });
+            }
+
+            for (let i = particulasFumaca.length - 1; i >= 0; i--) {
+                let p = particulasFumaca[i];
+                p.y += velAtual * 0.5; 
+                p.x += p.vx;
+                p.opacidade -= 5;
+                p.tamanho += 0.5;
+                noStroke();
+                fill(150, 150, 150, p.opacidade);
+                ellipse(p.x, p.y, p.tamanho);
+                if (p.opacidade <= 0) particulasFumaca.splice(i, 1);
+            }
+
+            carroX = lerp(carroX, faixas[carroPos], 0.15);
+            desenharPlayer(carroX, height - 120);
+
+            if (frameCount % floor(max(40, 90 - velAtual)) == 0) {
+                let faixaSorteada = floor(random(0, 3));
+                obstaculos.push({ x: faixas[faixaSorteada], y: -150, passou: false });
+            }
+
+            for (let i = obstaculos.length - 1; i >= 0; i--) {
+                let o = obstaculos[i];
+                o.y += velAtual;
+                desenharCaminhao(o.x, o.y);
+                if (o.y > height - 120 && !o.passou) {
+                    moedas += 10;
+                    o.passou = true;
+                }
+                if (abs(o.x - carroX) < 45 && abs(o.y - (height - 120)) < 90) gameOver();
+                if (o.y > height + 200) obstaculos.splice(i, 1);
+            }
+
+            fill(0, 150); rect(20, 20, 180, 80, 10);
+            fill(255); noStroke(); textAlign(LEFT); textSize(18);
+            text(`DISTÂNCIA: ${floor(distancia)}m`, 35, 50);
+            fill(241, 196, 15);
+            text(`PONTOS: ${moedas}`, 35, 75);
+        }
+
+        function desenharCenario(v) {
+            if (frameCount % 20 === 0) {
+                let lado = random() > 0.5 ? width * 0.03 : width * 0.88;
+                cidades.push({ x: lado, y: -250, w: random(50, 90), h: random(120, 350), c: random(30, 60) });
+            }
+            for (let i = cidades.length - 1; i >= 0; i--) {
+                let b = cidades[i];
+                b.y += v;
+                fill(b.c); noStroke();
+                rect(b.x, b.y, b.w, b.h);
+                fill(255, 255, 150, 100);
+                for (let j = 15; j < b.h - 15; j += 40) {
+                    rect(b.x + 15, b.y + j, 12, 12);
+                    if (b.w > 60) rect(b.x + b.w - 27, b.y + j, 12, 12);
+                }
+                if (b.y > height) cidades.splice(i, 1);
+            }
+        }
+
+        function desenharEstrada(v) {
+            fill(40); noStroke();
+            rect(width * 0.12, 0, width * 0.76, height);
+            stroke(80); strokeWeight(10);
+            line(width * 0.12, 0, width * 0.12, height);
+            line(width * 0.88, 0, width * 0.88, height);
+            stroke(255, 150); strokeWeight(4);
+            offsetEstrada += v;
+            if (offsetEstrada > 80) offsetEstrada = 0;
+            for (let y = -80 + offsetEstrada; y < height; y += 80) {
+                line(width * 0.37, y, width * 0.37, y + 40);
+                line(width * 0.63, y, width * 0.63, y + 40);
+            }
+        }
+
+        function desenharPlayer(x, y) {
+            push(); translate(x, y); rectMode(CENTER);
+            
+            // Corpo do carro
+            fill(30, 144, 255); stroke(0); strokeWeight(2);
+            rect(0, 0, 55, 90, 10); 
+            
+            // Asa Traseira (Aerofólio)
+            fill(20, 100, 200);
+            rect(0, 42, 65, 8, 2); // Asa principal
+            strokeWeight(1);
+            rect(-22, 38, 4, 10); // Suporte esquerdo
+            rect(22, 38, 4, 10);  // Suporte direito
+            
+            // Detalhes do vidro e teto
+            strokeWeight(2);
+            fill(0, 100, 200); rect(0, 5, 40, 45, 5); 
+            fill(173, 216, 230); rect(0, -15, 35, 15, 2); 
+            
+            // Faróis
+            fill(255, 255, 150); noStroke();
+            ellipse(-18, -40, 12, 6); ellipse(18, -40, 12, 6); 
+            pop();
+        }
+
+        function desenharCaminhao(x, y) {
+            push(); translate(x, y); rectMode(CENTER);
+            fill(180, 40, 40); stroke(50); strokeWeight(2);
+            rect(0, 0, 65, 130, 5);
+            fill(255, 0, 0); noStroke();
+            rect(-22, -60, 10, 5); rect(22, -60, 10, 5);
+            pop();
+        }
+
+        function gameOver() {
+            jogoRodando = false;
+            motorSutil.stop(); 
+            motorGrave.stop();
+            motorHarmonico.stop();
+            somBatida.amp(0.6, 0.05);
+            somBatida.amp(0, 0.4);
+            noLoop();
+            let distFinal = floor(distancia);
+            if (distFinal > recorde) {
+                recorde = distFinal;
+                localStorage.setItem("cityRacerRecorde", recorde);
+                document.getElementById('titulo').innerText = "NOVO RECORDE!";
+            } else {
+                document.getElementById('titulo').innerText = "FIM DE JOGO";
+            }
+            document.getElementById('ui-layer').style.display = 'flex';
+            document.getElementById('recorde-ui').innerText = `RECORDE: ${recorde}m`;
+            document.getElementById('btn-play').innerText = "TENTAR NOVAMENTE";
+        }
+
+        function touchStarted() {
+            if (!jogoRodando) return;
+            if (mouseX < width / 2) { if (carroPos > 0) carroPos--; } 
+            else { if (carroPos < 2) carroPos++; }
+            return false;
+        }
+
+        function windowResized() {
+            resizeCanvas(windowWidth, windowHeight);
+            atualizarFaixas();
+        }
+    </script>
+</body>
+  </html>
